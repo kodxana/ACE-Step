@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sox \
     libsox-fmt-all \
     ffmpeg \
+    python-3 \
     python3-pip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -28,14 +29,14 @@ WORKDIR /workspace
 COPY requirements.runpod.txt /workspace/requirements.runpod.txt
 
 # Install Python dependencies using uv for faster installation
-RUN pip install --no-cache-dir --upgrade pip uv && \
+RUN pip3 install --no-cache-dir --upgrade pip uv && \
     uv pip install --system --no-cache-dir -r requirements.runpod.txt
 
 # Copy the entire ACE-Step codebase
 COPY . /workspace/
 
 # Install ACE-Step package in development mode
-RUN pip install --no-cache-dir -e .
+RUN pip3 install --no-cache-dir -e .
 
 # Create necessary directories for model checkpoints and outputs
 RUN mkdir -p /runpod-volume/checkpoints /workspace/outputs
@@ -47,7 +48,7 @@ COPY preload_model.py /workspace/preload_model.py
 
 # Preload the default ACE-Step model to reduce cold start time
 # This downloads the model during container build, not at runtime
-RUN python /workspace/preload_model.py
+RUN python3 /workspace/preload_model.py
 
 # Set the handler as the entrypoint
-CMD ["python", "-u", "handler.py"]
+CMD ["python3", "-u", "handler.py"]
