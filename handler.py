@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import runpod
+from runpod.serverless.utils import rp_upload
 import os
 import gc
 import base64
@@ -104,13 +105,39 @@ def cleanup_gpu_memory():
     gc.collect()
 
 
-def encode_audio_to_base64(file_path: str) -> str:
+def upload_audio_file(file_path: str, job_id: str = None) -> Dict[str, Any]:
     """
-    Encode audio file to base64 for Runpod output.
+    Upload audio file using RunPod's upload utilities.
+    Returns either S3 URL or base64 encoded data.
     """
+    try:
+        # Try to upload to S3 if available
+        upload_result = rp_upload.upload_file_to_bucket(
+            file_path=file_path,
+            file_name=os.path.basename(file_path)
+        )
+        
+        if upload_result and "url" in upload_result:
+            logger.info(f"Audio uploaded to S3: {upload_result['url']}")
+            return {
+                "type": "url",
+                "url": upload_result["url"],
+                "size": os.path.getsize(file_path)
+            }
+    except Exception as e:
+        logger.warning(f"S3 upload failed, falling back to base64: {e}")
+    
+    # Fallback to base64 encoding if S3 not available
     with open(file_path, "rb") as audio_file:
         audio_data = audio_file.read()
-        return base64.b64encode(audio_data).decode('utf-8')
+        audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+        
+    logger.info(f"Audio encoded as base64, size: {len(audio_base64)} characters")
+    return {
+        "type": "base64",
+        "data": audio_base64,
+        "size": os.path.getsize(file_path)
+    }
 
 
 def handler(job):
@@ -149,8 +176,8 @@ def handler(job):
             )
             logger.info("Audio generation completed")
             
-            # Encode audio to base64 for output
-            audio_base64 = encode_audio_to_base64(temp_path)
+            # Upload audio using RunPod utilities
+            upload_result = upload_audio_file(temp_path, job.get("id"))
             
             # Clean up temporary file
             os.unlink(temp_path)
@@ -158,12 +185,22 @@ def handler(job):
         # Clean up GPU memory
         cleanup_gpu_memory()
         
-        return {
+        # Prepare response based on upload type
+        response = {
             "status": "success",
-            "audio_base64": audio_base64,
             "parameters_used": validated_input,
-            "message": "Audio generated successfully"
+            "message": "Audio generated successfully",
+            "file_size_bytes": upload_result["size"]
         }
+        
+        if upload_result["type"] == "url":
+            response["audio_url"] = upload_result["url"]
+            response["upload_type"] = "s3"
+        else:
+            response["audio_base64"] = upload_result["data"]
+            response["upload_type"] = "base64"
+        
+        return response
         
     except Exception as e:
         error_msg = f"Error processing job: {str(e)}"
