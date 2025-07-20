@@ -116,8 +116,8 @@ INPUT_SCHEMA = {
     "oss_steps": {
         "type": str,
         "required": False,
-        "default": "5,10,15,20,25",
-        "description": "Comma-separated OSS step values",
+        "default": "",  # Empty string to avoid custom sigmas by default
+        "description": "Comma-separated OSS step values (leave empty for standard timesteps)",
         "process": lambda x: x if isinstance(x, str) else ",".join(map(str, x))
     },
     
@@ -411,5 +411,22 @@ def get_pipeline_kwargs(validated_input: dict) -> dict:
     for input_key, pipeline_key in pipeline_params.items():
         if input_key in validated_input:
             kwargs[pipeline_key] = validated_input[input_key]
+    
+    # Special handling for oss_steps with heun scheduler
+    # Heun scheduler doesn't support custom sigmas, so we remove oss_steps
+    if kwargs.get("scheduler_type") == "heun" and "oss_steps" in kwargs:
+        if kwargs["oss_steps"] and kwargs["oss_steps"] != "":
+            print(f"Warning: oss_steps not supported with heun scheduler, ignoring: {kwargs['oss_steps']}")
+        kwargs.pop("oss_steps", None)
+    
+    # Handle double_condition cfg_type
+    # If using double_condition without proper guidance scales, switch to cfg
+    if kwargs.get("cfg_type") == "double_condition":
+        text_scale = kwargs.get("guidance_scale_text", 0.0)
+        lyric_scale = kwargs.get("guidance_scale_lyric", 0.0)
+        if text_scale <= 1.0 or lyric_scale <= 1.0:
+            print(f"Warning: double_condition requires guidance_scale_text > 1.0 and guidance_scale_lyric > 1.0")
+            print(f"Current values: text={text_scale}, lyric={lyric_scale}. Switching to 'cfg' type.")
+            kwargs["cfg_type"] = "cfg"
     
     return kwargs
