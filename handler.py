@@ -195,35 +195,39 @@ def handler(job):
             validated_input["torch_compile"]
         )
         
-        # Prepare generation parameters (format matches infer-api.py)
-        generation_params = (
-            validated_input["audio_duration"],
-            validated_input["prompt"],
-            validated_input["lyrics"],
-            validated_input["infer_step"],
-            validated_input["guidance_scale"],
-            validated_input["scheduler_type"],
-            validated_input["cfg_type"],
-            validated_input["omega_scale"],
-            ", ".join(map(str, validated_input["actual_seeds"])),
-            validated_input["guidance_interval"],
-            validated_input["guidance_interval_decay"],
-            validated_input["min_guidance_scale"],
-            validated_input["use_erg_tag"],
-            validated_input["use_erg_lyric"],
-            validated_input["use_erg_diffusion"],
-            ", ".join(map(str, validated_input["oss_steps"])),
-            validated_input["guidance_scale_text"],
-            validated_input["guidance_scale_lyric"],
-        )
+        # Prepare generation parameters - matching the pipeline __call__ signature
+        # The pipeline expects named parameters, not positional args
+        generation_kwargs = {
+            "audio_duration": validated_input["audio_duration"],
+            "prompt": validated_input["prompt"],
+            "lyrics": validated_input["lyrics"],
+            "infer_step": validated_input["infer_step"],
+            "guidance_scale": validated_input["guidance_scale"],
+            "scheduler_type": validated_input["scheduler_type"],
+            "cfg_type": validated_input["cfg_type"],
+            "omega_scale": validated_input["omega_scale"],
+            "actual_seeds": ", ".join(map(str, validated_input["actual_seeds"])),
+            "guidance_interval": validated_input["guidance_interval"],
+            "guidance_interval_decay": validated_input["guidance_interval_decay"],
+            "min_guidance_scale": validated_input["min_guidance_scale"],
+            "use_erg_tag": validated_input["use_erg_tag"],
+            "use_erg_lyric": validated_input["use_erg_lyric"],
+            "use_erg_diffusion": validated_input["use_erg_diffusion"],
+            "oss_steps": ", ".join(map(str, validated_input["oss_steps"])),
+            "guidance_scale_text": validated_input["guidance_scale_text"],
+            "guidance_scale_lyric": validated_input["guidance_scale_lyric"],
+        }
         
         # Generate audio with temporary file
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
             temp_path = temp_file.name
             
             logger.info("Starting audio generation...")
+            logger.info(f"Generation kwargs: {generation_kwargs}")
+            
+            # Call pipeline with keyword arguments
             model_pipeline(
-                *generation_params,
+                **generation_kwargs,
                 save_path=temp_path
             )
             logger.info("Audio generation completed")
