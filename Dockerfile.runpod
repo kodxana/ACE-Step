@@ -39,22 +39,14 @@ RUN pip install --no-cache-dir -e .
 # Create necessary directories for model checkpoints and outputs
 RUN mkdir -p /runpod-volume/checkpoints /workspace/outputs
 
-# Copy the handler file to the workspace
+# Copy the handler and utility files
 COPY handler.py /workspace/handler.py
 COPY checkpoint_manager.py /workspace/checkpoint_manager.py
+COPY preload_model.py /workspace/preload_model.py
 
 # Preload the default ACE-Step model to reduce cold start time
 # This downloads the model during container build, not at runtime
-RUN python -c "
-import os
-os.environ['CHECKPOINT_PATH'] = '/workspace/models'
-from checkpoint_manager import preload_default_model
-try:
-    model_path = preload_default_model()
-    print(f'Model preloaded successfully at: {model_path}')
-except Exception as e:
-    print(f'Model preload failed (will download at runtime): {e}')
-"
+RUN python /workspace/preload_model.py
 
 # Set the handler as the entrypoint
 CMD ["python", "-u", "handler.py"]
