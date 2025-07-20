@@ -11,6 +11,7 @@ from loguru import logger
 import torch
 
 from acestep.pipeline_ace_step import ACEStepPipeline
+from rp_schema import validate_input as validate_schema, get_pipeline_kwargs
 
 
 # Global variables for model caching
@@ -81,81 +82,17 @@ def load_model(checkpoint_path: str, bf16: bool = True, torch_compile: bool = Fa
 
 def validate_input(job_input: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Validate and set default values for ACE-Step parameters.
+    Validate input using schema and add model configuration.
     """
-    # Required parameters with defaults
-    defaults = {
-        "audio_duration": 30.0,
-        "prompt": "",
-        "lyrics": "",
-        "infer_step": 27,
-        "guidance_scale": 3.0,
-        "scheduler_type": "euler",
-        "cfg_type": "double_condition",
-        "omega_scale": 1.0,
-        "actual_seeds": [42],
-        "guidance_interval": 1.0,
-        "guidance_interval_decay": 0.95,
-        "min_guidance_scale": 1.0,
-        "use_erg_tag": False,
-        "use_erg_lyric": False,
-        "use_erg_diffusion": False,
-        "oss_steps": [5, 10, 15, 20, 25],
-        "guidance_scale_text": 0.0,
-        "guidance_scale_lyric": 0.0,
-        # Model configuration
-        "bf16": True,
-        "torch_compile": False,
-        "checkpoint_path": CHECKPOINT_PATH
-    }
+    # Use schema validation
+    validated_input = validate_schema(job_input)
     
-    # Apply defaults for missing values and ensure correct types
-    for key, default_value in defaults.items():
-        if key not in job_input:
-            job_input[key] = default_value
+    # Add model configuration parameters
+    validated_input["bf16"] = validated_input.get("bf16", True)
+    validated_input["torch_compile"] = validated_input.get("torch_compile", False)
+    validated_input["checkpoint_path"] = job_input.get("checkpoint_path", CHECKPOINT_PATH)
     
-    # Ensure string parameters are strings
-    job_input["prompt"] = str(job_input["prompt"])
-    job_input["lyrics"] = str(job_input["lyrics"])
-    job_input["scheduler_type"] = str(job_input["scheduler_type"])
-    job_input["cfg_type"] = str(job_input["cfg_type"])
-    
-    # Ensure numeric parameters are correct types
-    job_input["audio_duration"] = float(job_input["audio_duration"])
-    job_input["infer_step"] = int(job_input["infer_step"])
-    job_input["guidance_scale"] = float(job_input["guidance_scale"])
-    job_input["omega_scale"] = float(job_input["omega_scale"])
-    job_input["guidance_interval"] = float(job_input["guidance_interval"])
-    job_input["guidance_interval_decay"] = float(job_input["guidance_interval_decay"])
-    job_input["min_guidance_scale"] = float(job_input["min_guidance_scale"])
-    job_input["guidance_scale_text"] = float(job_input["guidance_scale_text"])
-    job_input["guidance_scale_lyric"] = float(job_input["guidance_scale_lyric"])
-    
-    # Ensure list parameters are lists
-    if not isinstance(job_input["actual_seeds"], list):
-        job_input["actual_seeds"] = [job_input["actual_seeds"]]
-    if not isinstance(job_input["oss_steps"], list):
-        job_input["oss_steps"] = [job_input["oss_steps"]]
-    
-    # Validation
-    if job_input["audio_duration"] <= 0 or job_input["audio_duration"] > 240:
-        raise ValueError("audio_duration must be between 0 and 240 seconds")
-    
-    if job_input["infer_step"] < 1 or job_input["infer_step"] > 100:
-        raise ValueError("infer_step must be between 1 and 100")
-    
-    if job_input["guidance_scale"] < 0 or job_input["guidance_scale"] > 10:
-        raise ValueError("guidance_scale must be between 0 and 10")
-    
-    valid_schedulers = ["euler", "heun", "pingpong"]
-    if job_input["scheduler_type"] not in valid_schedulers:
-        raise ValueError(f"scheduler_type must be one of: {valid_schedulers}")
-    
-    valid_cfg_types = ["double_condition", "zero_star", "guidance"]
-    if job_input["cfg_type"] not in valid_cfg_types:
-        raise ValueError(f"cfg_type must be one of: {valid_cfg_types}")
-    
-    return job_input
+    return validated_input
 
 
 def cleanup_gpu_memory():
@@ -195,28 +132,8 @@ def handler(job):
             validated_input["torch_compile"]
         )
         
-        # Prepare generation parameters - matching the pipeline __call__ signature
-        # The pipeline expects named parameters, not positional args
-        generation_kwargs = {
-            "audio_duration": validated_input["audio_duration"],
-            "prompt": validated_input["prompt"],
-            "lyrics": validated_input["lyrics"],
-            "infer_step": validated_input["infer_step"],
-            "guidance_scale": validated_input["guidance_scale"],
-            "scheduler_type": validated_input["scheduler_type"],
-            "cfg_type": validated_input["cfg_type"],
-            "omega_scale": validated_input["omega_scale"],
-            "actual_seeds": ", ".join(map(str, validated_input["actual_seeds"])),
-            "guidance_interval": validated_input["guidance_interval"],
-            "guidance_interval_decay": validated_input["guidance_interval_decay"],
-            "min_guidance_scale": validated_input["min_guidance_scale"],
-            "use_erg_tag": validated_input["use_erg_tag"],
-            "use_erg_lyric": validated_input["use_erg_lyric"],
-            "use_erg_diffusion": validated_input["use_erg_diffusion"],
-            "oss_steps": ", ".join(map(str, validated_input["oss_steps"])),
-            "guidance_scale_text": validated_input["guidance_scale_text"],
-            "guidance_scale_lyric": validated_input["guidance_scale_lyric"],
-        }
+        # Get pipeline kwargs from validated input
+        generation_kwargs = get_pipeline_kwargs(validated_input)
         
         # Generate audio with temporary file
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
