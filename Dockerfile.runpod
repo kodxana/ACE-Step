@@ -1,0 +1,60 @@
+# Use RunPod's base image with CUDA support
+FROM runpod/pytorch:2.1.0-py3.10-cuda12.1.1-devel-ubuntu22.04
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_ENABLE_HF_TRANSFER=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    CHECKPOINT_PATH=/runpod-volume/checkpoints
+
+# Update system and install dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    wget \
+    build-essential \
+    sox \
+    libsox-fmt-all \
+    ffmpeg \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy requirements first for better Docker layer caching
+COPY requirements.runpod.txt /workspace/requirements.runpod.txt
+
+# Install Python dependencies using uv for faster installation
+RUN pip install --no-cache-dir --upgrade pip uv && \
+    uv pip install --system --no-cache-dir -r requirements.runpod.txt
+
+# Copy the entire ACE-Step codebase
+COPY . /workspace/
+
+# Install ACE-Step package in development mode
+RUN pip install --no-cache-dir -e .
+
+# Create necessary directories for model checkpoints and outputs
+RUN mkdir -p /runpod-volume/checkpoints /workspace/outputs
+
+# Copy the handler file to the workspace
+COPY handler.py /workspace/handler.py
+COPY checkpoint_manager.py /workspace/checkpoint_manager.py
+
+# Preload the default ACE-Step model to reduce cold start time
+# This downloads the model during container build, not at runtime
+RUN python -c "
+import os
+os.environ['CHECKPOINT_PATH'] = '/workspace/models'
+from checkpoint_manager import preload_default_model
+try:
+    model_path = preload_default_model()
+    print(f'Model preloaded successfully at: {model_path}')
+except Exception as e:
+    print(f'Model preload failed (will download at runtime): {e}')
+"
+
+# Set the handler as the entrypoint
+CMD ["python", "-u", "handler.py"]
