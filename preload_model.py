@@ -30,17 +30,23 @@ def main():
             total_size = sum(f.stat().st_size for f in files if f.is_file()) / (1024**3)
             logger.info(f"Model directory contains {file_count} files, total size: {total_size:.2f}GB")
             
-            # Check for required files
-            required_files = ['config.json']
-            has_model_files = any(model_dir.glob('*.safetensors')) or any(model_dir.glob('pytorch_model*.bin'))
-            has_config = (model_dir / 'config.json').exists()
+            # Check for ACE-Step model structure
+            required_subdirs = ['music_dcae_f8c8', 'music_vocoder', 'ace_step_transformer', 'umt5-base']
+            missing_dirs = []
             
-            if has_model_files and has_config:
-                logger.info("✅ Model validation passed - all required files found")
-                return True
-            else:
-                logger.warning("⚠️ Model validation failed - missing required files")
+            for subdir in required_subdirs:
+                subdir_path = model_dir / subdir
+                if not subdir_path.exists():
+                    missing_dirs.append(subdir)
+                else:
+                    logger.info(f"Found model component: {subdir}")
+            
+            if missing_dirs:
+                logger.warning(f"⚠️ Missing model components: {missing_dirs}")
                 return False
+            else:
+                logger.info("✅ Model validation passed - all required components found")
+                return True
         else:
             logger.error(f"❌ Model directory not found: {model_path}")
             return False

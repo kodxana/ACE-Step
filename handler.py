@@ -20,8 +20,30 @@ CHECKPOINT_PATH = os.environ.get("CHECKPOINT_PATH", "/runpod-volume/checkpoints"
 # Check for preloaded model in container
 PRELOADED_MODEL_PATH = "/workspace/models"
 if os.path.exists(PRELOADED_MODEL_PATH):
-    logger.info(f"Found preloaded model at: {PRELOADED_MODEL_PATH}")
-    CHECKPOINT_PATH = PRELOADED_MODEL_PATH
+    # Verify it's a complete ACE-Step model
+    required_components = ['music_dcae_f8c8', 'music_vocoder', 'ace_step_transformer', 'umt5-base']
+    model_path = None
+    
+    # Check if it's directly the model directory
+    if all(os.path.exists(os.path.join(PRELOADED_MODEL_PATH, comp)) for comp in required_components):
+        model_path = PRELOADED_MODEL_PATH
+        logger.info(f"Found complete preloaded model at: {PRELOADED_MODEL_PATH}")
+    else:
+        # Check if it's in a subdirectory (HuggingFace download structure)
+        for item in os.listdir(PRELOADED_MODEL_PATH):
+            item_path = os.path.join(PRELOADED_MODEL_PATH, item)
+            if os.path.isdir(item_path):
+                if all(os.path.exists(os.path.join(item_path, comp)) for comp in required_components):
+                    model_path = item_path
+                    logger.info(f"Found complete preloaded model at: {model_path}")
+                    break
+    
+    if model_path:
+        CHECKPOINT_PATH = model_path
+    else:
+        logger.warning(f"Preloaded model directory exists but incomplete, will download at runtime: {PRELOADED_MODEL_PATH}")
+else:
+    logger.info(f"No preloaded model found, will download at runtime to: {CHECKPOINT_PATH}")
 
 
 def load_model(checkpoint_path: str, bf16: bool = True, torch_compile: bool = False) -> ACEStepPipeline:
@@ -36,12 +58,16 @@ def load_model(checkpoint_path: str, bf16: bool = True, torch_compile: bool = Fa
             # Set environment for single GPU
             os.environ["CUDA_VISIBLE_DEVICES"] = "0"
             
-            # Initialize pipeline
+            # Initialize pipeline with explicit checkpoint path
             pipeline = ACEStepPipeline(
                 checkpoint_dir=checkpoint_path,
                 dtype="bfloat16" if bf16 else "float32",
                 torch_compile=torch_compile,
             )
+            
+            # Ensure the pipeline uses the correct checkpoint path
+            if hasattr(pipeline, 'checkpoint_dir'):
+                pipeline.checkpoint_dir = checkpoint_path
             
             MODEL_CACHE[cache_key] = pipeline
             logger.info("Model loaded successfully and cached")
@@ -83,10 +109,33 @@ def validate_input(job_input: Dict[str, Any]) -> Dict[str, Any]:
         "checkpoint_path": CHECKPOINT_PATH
     }
     
-    # Apply defaults for missing values
+    # Apply defaults for missing values and ensure correct types
     for key, default_value in defaults.items():
         if key not in job_input:
             job_input[key] = default_value
+    
+    # Ensure string parameters are strings
+    job_input["prompt"] = str(job_input["prompt"])
+    job_input["lyrics"] = str(job_input["lyrics"])
+    job_input["scheduler_type"] = str(job_input["scheduler_type"])
+    job_input["cfg_type"] = str(job_input["cfg_type"])
+    
+    # Ensure numeric parameters are correct types
+    job_input["audio_duration"] = float(job_input["audio_duration"])
+    job_input["infer_step"] = int(job_input["infer_step"])
+    job_input["guidance_scale"] = float(job_input["guidance_scale"])
+    job_input["omega_scale"] = float(job_input["omega_scale"])
+    job_input["guidance_interval"] = float(job_input["guidance_interval"])
+    job_input["guidance_interval_decay"] = float(job_input["guidance_interval_decay"])
+    job_input["min_guidance_scale"] = float(job_input["min_guidance_scale"])
+    job_input["guidance_scale_text"] = float(job_input["guidance_scale_text"])
+    job_input["guidance_scale_lyric"] = float(job_input["guidance_scale_lyric"])
+    
+    # Ensure list parameters are lists
+    if not isinstance(job_input["actual_seeds"], list):
+        job_input["actual_seeds"] = [job_input["actual_seeds"]]
+    if not isinstance(job_input["oss_steps"], list):
+        job_input["oss_steps"] = [job_input["oss_steps"]]
     
     # Validation
     if job_input["audio_duration"] <= 0 or job_input["audio_duration"] > 240:
@@ -146,7 +195,7 @@ def handler(job):
             validated_input["torch_compile"]
         )
         
-        # Prepare generation parameters
+        # Prepare generation parameters (format matches infer-api.py)
         generation_params = (
             validated_input["audio_duration"],
             validated_input["prompt"],
